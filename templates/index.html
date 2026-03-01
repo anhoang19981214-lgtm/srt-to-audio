@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SRT to Audio – Chuyển phụ đề thành giọng nói</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0f1a;
+      --surface:   #13162a;
+      --card:      #1a1e35;
+      --border:    #252a45;
+      --accent:    #6c63ff;
+      --accent2:   #a78bfa;
+      --success:   #34d399;
+      --warning:   #fbbf24;
+      --error:     #f87171;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --radius:    16px;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 16px 80px;
+    }
+
+    /* ── Background glow ── */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -200px; left: 50%;
+      transform: translateX(-50%);
+      width: 900px; height: 600px;
+      background: radial-gradient(ellipse at center,
+        rgba(108,99,255,0.18) 0%,
+        rgba(167,139,250,0.06) 60%,
+        transparent 100%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Layout ── */
+    .wrapper {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 680px;
+    }
+
+    /* ── Header ── */
+    header { text-align: center; margin-bottom: 40px; }
+
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .logo-icon {
+      width: 52px; height: 52px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 14px;
+      display: grid; place-items: center;
+      font-size: 24px;
+      box-shadow: 0 8px 32px rgba(108,99,255,0.4);
+    }
+
+    h1 {
+      font-size: 28px; font-weight: 700;
+      background: linear-gradient(135deg, #fff 0%, var(--accent2) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 15px;
+      margin-top: 6px;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 32px;
+      margin-bottom: 24px;
+      box-shadow: 0 4px 40px rgba(0,0,0,0.4);
+      backdrop-filter: blur(8px);
+    }
+
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--accent2);
+      margin-bottom: 20px;
+    }
+
+    /* ── Drop Zone ── */
+    #drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      padding: 44px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all .25s ease;
+      background: rgba(108,99,255,0.03);
+    }
+
+    #drop-zone:hover, #drop-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(108,99,255,0.08);
+    }
+
+    #drop-zone.has-file {
+      border-color: var(--success);
+      background: rgba(52,211,153,0.05);
+    }
+
+    .drop-icon { font-size: 40px; margin-bottom: 12px; display: block; }
+
+    .drop-title {
+      font-size: 16px; font-weight: 600; color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    .drop-meta { font-size: 13px; color: var(--muted); }
+
+    #file-name {
+      margin-top: 10px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--success);
+      display: none;
+    }
+
+    #file-input { display: none; }
+
+    /* ── Grid options ── */
+    .options-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .option-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--muted);
+    }
+
+    select {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-size: 14px;
+      padding: 10px 14px;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='%2364748b'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      cursor: pointer;
+      transition: border-color .2s;
+    }
+
+    select:focus { outline: none; border-color: var(--accent); }
+
+    /* ── Toggle ── */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+    }
+
+    .toggle-info { display: flex; flex-direction: column; gap: 2px; }
+    .toggle-label { font-size: 14px; font-weight: 500; }
+    .toggle-desc  { font-size: 12px; color: var(--muted); }
+
+    .toggle {
+      position: relative;
+      width: 44px; height: 24px;
+    }
+
+    .toggle input { display: none; }
+
+    .toggle-slider {
+      position: absolute; inset: 0;
+      background: var(--border);
+      border-radius: 99px;
+      cursor: pointer;
+      transition: background .25s;
+    }
+
+    .toggle-slider::before {
+      content: '';
+      position: absolute;
+      width: 18px; height: 18px;
+      left: 3px; top: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform .25s;
+    }
+
+    .toggle input:checked + .toggle-slider { background: var(--accent); }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+    /* ── Button ── */
+    #submit-btn {
+      width: 100%;
+      padding: 15px;
+      border: none;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      letter-spacing: 0.4px;
+      transition: opacity .2s, transform .15s, box-shadow .2s;
+      box-shadow: 0 4px 20px rgba(108,99,255,0.4);
+    }
+
+    #submit-btn:hover { opacity: 0.9; transform: translateY(-1px); box-shadow: 0 6px 28px rgba(108,99,255,0.55); }
+    #submit-btn:active { transform: translateY(0); }
+    #submit-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    /* ── Progress Card ── */
+    #progress-card { display: none; }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 99px;
+      font-size: 13px;
+      font-weight: 600;
+      background: rgba(108,99,255,0.15);
+      color: var(--accent2);
+      margin-bottom: 18px;
+    }
+
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent2);
+      animation: pulse 1.4s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .progress-track {
+      background: var(--surface);
+      border-radius: 99px;
+      height: 8px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      border-radius: 99px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      width: 0%;
+      transition: width .5s ease;
+    }
+
+    .progress-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    #log-msg {
+      margin-top: 14px;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.6;
+      min-height: 40px;
+      word-break: break-word;
+    }
+
+    /* ── Result ── */
+    #result-card { display: none; }
+
+    .result-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .result-info { display: flex; flex-direction: column; gap: 4px; }
+
+    .result-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--success);
+    }
+
+    .result-meta { font-size: 13px; color: var(--muted); }
+
+    #download-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 11px 22px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--success), #059669);
+      color: #fff;
+      font-weight: 600;
+      font-size: 14px;
+      text-decoration: none;
+      transition: opacity .2s, transform .15s;
+      white-space: nowrap;
+      box-shadow: 0 4px 16px rgba(52,211,153,0.35);
+    }
+
+    #download-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+
+    #reset-btn {
+      display: block;
+      width: 100%;
+      margin-top: 20px;
+      padding: 11px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 14px;
+      cursor: pointer;
+      transition: border-color .2s, color .2s;
+    }
+
+    #reset-btn:hover { border-color: var(--accent); color: var(--text); }
+
+    /* ── Error state ── */
+    .status-badge.error { background: rgba(248,113,113,0.15); color: var(--error); }
+    .status-dot.error   { background: var(--error); animation: none; }
+
+    /* ── Divider in card ── */
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 20px 0;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 500px) {
+      .options-grid { grid-template-columns: 1fr; }
+      .card { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+
+    <!-- Header -->
+    <header>
+      <div class="logo">
+        <div class="logo-icon">🎙️</div>
+        <div>
+          <h1>SRT to Audio</h1>
+        </div>
+      </div>
+      <p class="subtitle">Chuyển file phụ đề .srt thành giọng đọc đúng thời gian</p>
+    </header>
+
+    <!-- Upload & Settings Card -->
+    <div class="card" id="main-card">
+      <div class="card-title">📁 Chọn file & Cài đặt</div>
+
+      <!-- Drop zone -->
+      <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+        <span class="drop-icon">📄</span>
+        <div class="drop-title">Kéo thả file SRT vào đây</div>
+        <div class="drop-meta">hoặc nhấp để chọn file</div>
+        <div id="file-name"></div>
+      </div>
+      <input type="file" id="file-input" accept=".srt"/>
+
+      <hr class="divider"/>
+
+      <!-- Options -->
+      <div class="options-grid">
+        <div class="option-group">
+          <label for="lang-select">🌐 Ngôn ngữ</label>
+          <select id="lang-select">
+            <option value="vi" selected>🇻🇳 Tiếng Việt</option>
+            <option value="en">🇺🇸 English</option>
+            <option value="zh-CN">🇨🇳 Tiếng Trung</option>
+            <option value="ja">🇯🇵 Tiếng Nhật</option>
+            <option value="ko">🇰🇷 Tiếng Hàn</option>
+            <option value="fr">🇫🇷 Tiếng Pháp</option>
+            <option value="de">🇩🇪 Tiếng Đức</option>
+            <option value="es">🇪🇸 Tiếng Tây Ban Nha</option>
+            <option value="th">🇹🇭 Tiếng Thái</option>
+            <option value="id">🇮🇩 Tiếng Indonesia</option>
+          </select>
+        </div>
+        <div class="option-group">
+          <label for="format-select">💾 Định dạng âm thanh</label>
+          <select id="format-select">
+            <option value="mp3" selected>MP3 (khuyến nghị)</option>
+            <option value="wav">WAV (chất lượng cao)</option>
+            <option value="ogg">OGG</option>
+          </select>
+        </div>
+      </div>
+
+      <hr class="divider"/>
+
+      <div class="toggle-row">
+        <div class="toggle-info">
+          <span class="toggle-label">🐢 Đọc chậm</span>
+          <span class="toggle-desc">Giọng đọc chậm hơn, dễ nghe hơn</span>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="slow-toggle"/>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <hr class="divider"/>
+
+      <button id="submit-btn" onclick="startConversion()">⚡ Bắt đầu chuyển đổi</button>
+    </div>
+
+    <!-- Progress Card -->
+    <div class="card" id="progress-card">
+      <div class="card-title">⚙️ Đang xử lý</div>
+      <div class="status-badge" id="status-badge">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">Đang khởi động...</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+      <div class="progress-meta">
+        <span id="progress-count">0 / 0 đoạn</span>
+        <span id="progress-pct">0%</span>
+      </div>
+      <p id="log-msg">Vui lòng chờ trong giây lát...</p>
+    </div>
+
+    <!-- Result Card -->
+    <div class="card" id="result-card">
+      <div class="card-title">✅ Hoàn thành</div>
+      <div class="result-inner">
+        <div class="result-info">
+          <span class="result-title">🎵 File âm thanh đã sẵn sàng!</span>
+          <span class="result-meta" id="result-meta">–</span>
+        </div>
+        <a href="#" id="download-btn" download>⬇️ Tải xuống</a>
+      </div>
+      <button id="reset-btn" onclick="reset()">🔄 Chuyển đổi file khác</button>
+    </div>
+
+  </div>
+
+  <script>
+    let currentJobId = null;
+    let pollInterval = null;
+    let selectedFile = null;
+
+    // ── Drag & Drop ──
+    const dropZone  = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file) setFile(file);
+    });
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) setFile(fileInput.files[0]);
+    });
+
+    function setFile(file) {
+      if (!file.name.endsWith('.srt')) {
+        alert('Vui lòng chọn file có định dạng .srt');
+        return;
+      }
+      selectedFile = file;
+      dropZone.classList.add('has-file');
+      const fn = document.getElementById('file-name');
+      fn.style.display = 'block';
+      fn.textContent   = '✓ ' + file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+      const icon = dropZone.querySelector('.drop-icon');
+      icon.textContent = '✅';
+    }
+
+    // ── Conversion ──
+    function startConversion() {
+      if (!selectedFile) { alert('Vui lòng chọn file .srt trước!'); return; }
+
+      const lang  = document.getElementById('lang-select').value;
+      const fmt   = document.getElementById('format-select').value;
+      const slow  = document.getElementById('slow-toggle').checked;
+
+      const formData = new FormData();
+      formData.append('srt_file', selectedFile);
+      formData.append('lang', lang);
+      formData.append('format', fmt);
+      formData.append('slow', slow);
+
+      document.getElementById('submit-btn').disabled = true;
+      document.getElementById('progress-card').style.display = 'block';
+      document.getElementById('result-card').style.display   = 'none';
+      document.getElementById('progress-fill').style.width   = '5%';
+      document.getElementById('progress-count').textContent  = '0 / 0 đoạn';
+      document.getElementById('progress-pct').textContent    = '0%';
+      document.getElementById('log-msg').textContent         = 'Đang gửi file...';
+
+      fetch('/upload', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+          if (data.error) { showError(data.error); return; }
+          currentJobId = data.job_id;
+          pollInterval = setInterval(pollStatus, 1000);
+        })
+        .catch(e => showError('Kết nối thất bại: ' + e));
+    }
+
+    function pollStatus() {
+      if (!currentJobId) return;
+      fetch('/status/' + currentJobId)
+        .then(r => r.json())
+        .then(data => {
+          const status = data.status;
+          document.getElementById('log-msg').textContent = data.message || '';
+
+          if (data.total > 0) {
+            const pct = Math.round((data.progress / data.total) * 100);
+            document.getElementById('progress-fill').style.width = pct + '%';
+            document.getElementById('progress-count').textContent = data.progress + ' / ' + data.total + ' đoạn';
+            document.getElementById('progress-pct').textContent   = pct + '%';
+          } else {
+            document.getElementById('progress-fill').style.width = '15%';
+          }
+
+          if (status === 'exporting') {
+            document.getElementById('progress-fill').style.width = '95%';
+          }
+
+          if (status === 'done') {
+            clearInterval(pollInterval);
+            document.getElementById('progress-fill').style.width = '100%';
+            document.getElementById('progress-count').textContent = data.total + ' / ' + data.total + ' đoạn';
+            document.getElementById('progress-pct').textContent   = '100%';
+            showResult(data);
+          }
+
+          if (status === 'error') {
+            clearInterval(pollInterval);
+            showError(data.message);
+          }
+        })
+        .catch(() => {/* ignore */});
+    }
+
+    function showResult(data) {
+      document.getElementById('progress-card').style.display = 'none';
+      document.getElementById('result-card').style.display   = 'block';
+      document.getElementById('result-meta').textContent = `Thời lượng: ${data.duration}s`;
+      const btn = document.getElementById('download-btn');
+      btn.href = '/download/' + currentJobId;
+      btn.download = data.file;
+    }
+
+    function showError(msg) {
+      document.getElementById('status-badge').classList.add('error');
+      document.getElementById('status-dot').classList.add('error');
+      document.getElementById('status-text').textContent = 'Lỗi';
+      document.getElementById('log-msg').style.color = 'var(--error)';
+      document.getElementById('log-msg').textContent  = '❌ ' + msg;
+      document.getElementById('submit-btn').disabled  = false;
+    }
+
+    function reset() {
+      currentJobId = null;
+      selectedFile = null;
+      if (pollInterval) clearInterval(pollInterval);
+
+      document.getElementById('drop-zone').classList.remove('has-file');
+      document.getElementById('drop-zone').querySelector('.drop-icon').textContent = '📄';
+      document.getElementById('file-name').style.display = 'none';
+      document.getElementById('file-input').value       = '';
+      document.getElementById('submit-btn').disabled    = false;
+      document.getElementById('progress-card').style.display = 'none';
+      document.getElementById('result-card').style.display   = 'none';
+      document.getElementById('status-badge').classList.remove('error');
+      document.getElementById('status-dot').classList.remove('error');
+      document.getElementById('status-text').textContent = 'Đang khởi động...';
+      document.getElementById('log-msg').style.color = '';
+    }
+  </script>
+</body>
+</html>
