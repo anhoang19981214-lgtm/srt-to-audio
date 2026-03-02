@@ -10,12 +10,13 @@ import sys
 import argparse
 import io
 import time
+import asyncio
 from pathlib import Path
 
 try:
-    from gtts import gTTS
+    import edge_tts
 except ImportError:
-    print("Lỗi: Thiếu thư viện gTTS. Chạy: pip install gTTS")
+    print("Lỗi: Thiếu thư viện edge-tts. Chạy: pip install edge-tts")
     sys.exit(1)
 
 try:
@@ -76,58 +77,62 @@ def parse_srt(srt_path: str) -> list[dict]:
 #  TTS + ghép âm thanh
 # ─────────────────────────────────────────────
 
-def text_to_audio_segment(text: str, lang: str = "vi", slow: bool = False) -> AudioSegment:
-    """Tạo AudioSegment từ chuỗi text bằng gTTS"""
-    buf = io.BytesIO()
-    tts = gTTS(text=text, lang=lang, slow=slow)
-    tts.write_to_fp(buf)
-    buf.seek(0)
-    seg = AudioSegment.from_file(buf, format="mp3")
-    return seg
+async def text_to_mp3_bytes(text: str, voice: str = "vi-VN-NamMinhNeural", rate: str = "+0%") -> bytes:
+    communicate = edge_tts.Communicate(text, voice, rate=rate)
+    audio_data = bytearray()
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_data.extend(chunk["data"])
+    return bytes(audio_data)
+
+def text_to_audio_segment(text: str, voice: str = "vi-VN-NamMinhNeural", slow: bool = False) -> AudioSegment:
+    """Tạo AudioSegment từ chuỗi text bằng edge-tts"""
+    rate = "-20%" if slow else "+0%"
+    try:
+        mp3_bytes = asyncio.run(text_to_mp3_bytes(text, voice, rate))
+        buf = io.BytesIO(mp3_bytes)
+        seg = AudioSegment.from_file(buf, format="mp3")
+        return seg
+    except Exception as e:
+        print(f"Lỗi TTS nội bộ: {e}")
+        raise e
 
 
 def build_audio(entries: list[dict], lang: str = "vi",
-                slow: bool = False, speed_factor: float = 1.0) -> AudioSegment:
+                slow: bool = False) -> AudioSegment:
     """
     Xây dựng track âm thanh cuối cùng.
-    Mỗi đoạn TTS được đặt đúng vị trí start_ms của SRT.
-    Nếu TTS dài hơn khoảng cho phép, tăng tốc độ để vừa.
+    Sử dụng giọng Nam Minh (Edge-TTS), tốc độ chuẩn, không nén thời gian!
+    Nếu câu dài quá sẽ tự động đẩy câu tiếp theo lùi lại (nối tiếp nhau).
     """
     if not entries:
         return AudioSegment.silent(duration=1000)
 
-    last_end = entries[-1]["end_ms"]
-    master   = AudioSegment.silent(duration=last_end + 500)
+    master = AudioSegment.empty()
+    voice = "vi-VN-NamMinhNeural" if lang == "vi" else ("en-US-ChristopherNeural" if lang == "en" else "vi-VN-NamMinhNeural")
 
     total = len(entries)
     for i, entry in enumerate(entries):
-        print(f"  [{i+1}/{total}] #{entry['index']} | {entry['start_ms']/1000:.2f}s → {entry['end_ms']/1000:.2f}s | {entry['text'][:60]}")
+        print(f"  [{i+1}/{total}] #{entry['index']} | Target: {entry['start_ms']/1000:.2f}s | {entry['text'][:60]}")
 
         start_ms  = entry["start_ms"]
-        allowed_ms = entry["end_ms"] - start_ms  # khoảng thời gian tối đa
 
         try:
-            seg = text_to_audio_segment(entry["text"], lang=lang, slow=slow)
+            seg = text_to_audio_segment(entry["text"], voice=voice, slow=slow)
         except Exception as e:
             print(f"    ⚠ Lỗi TTS: {e}")
             continue
 
-        seg_len = len(seg)
+        # Đảm bảo vị trí âm thanh không bị phát sớm hơn thời gian của file SRT
+        target_start = max(start_ms, len(master))
+        if target_start > len(master):
+            master += AudioSegment.silent(duration=target_start - len(master))
 
-        # Nếu TTS dài hơn allowed, tăng tốc
-        if seg_len > allowed_ms and allowed_ms > 0:
-            ratio = seg_len / allowed_ms
-            # pydub: speedup bằng cách thay đổi frame_rate
-            new_rate = int(seg.frame_rate * ratio * speed_factor)
-            seg = seg._spawn(seg.raw_data, overrides={"frame_rate": new_rate})
-            seg = seg.set_frame_rate(24000)
-            print(f"    ↩ Đã tăng tốc x{ratio:.2f}")
+        # Nối tiếp âm thanh vào cuối
+        master += seg
 
-        # Overlay đoạn vào đúng vị trí
-        master = master.overlay(seg, position=start_ms)
-
-        # Nghỉ ngắn để tránh rate-limit gTTS
-        time.sleep(0.3)
+        # Nghỉ ngắn để tránh rate-limit
+        time.sleep(0.1)
 
     return master
 
